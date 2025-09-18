@@ -1,0 +1,21 @@
+# Android/IntelliJ
+.gradle/
+local.properties
+/.idea/
+/build/
+/app/build/
+
+# Node
+node_modules/
+.env
+
+# .NET
+bin/
+obj/
+publish/
+*.user
+*.vs
+
+# General
+.DS_Store
+*.log

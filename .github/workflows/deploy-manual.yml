@@ -1,0 +1,26 @@
+name: Deploy to Zoomie (manual)
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.ZOOMIE_SFTP_HOST && secrets.ZOOMIE_SFTP_USER && secrets.ZOOMIE_SFTP_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish artifact
+        run: |
+          cd services/auth-service-dotnet
+          dotnet publish -c Release -o publish
+      - name: Deploy to Zoomie (SFTP)
+        uses: SamKirkland/FTP-Deploy-Action@4.4.0
+        with:
+          server: ${{ secrets.ZOOMIE_SFTP_HOST }}
+          username: ${{ secrets.ZOOMIE_SFTP_USER }}
+          password: ${{ secrets.ZOOMIE_SFTP_PASS }}
+          local-dir: services/auth-service-dotnet/publish
+          server-dir: /var/www/miapp
