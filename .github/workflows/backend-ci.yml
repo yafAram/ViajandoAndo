@@ -1,9 +1,10 @@
-name: Backend CI (Build & Test)
+name: Backend CI (build & test - .NET 9)
+
 on:
   push:
-    branches: [ develop, main ]
+    branches: [ main, develop, 'feature/**' ]
   pull_request:
-    branches: [ develop, main ]
+    branches: [ main, develop ]
 
 jobs:
   build-and-test:
@@ -11,6 +12,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v3
@@ -21,41 +24,64 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/global.json') }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'global.json') }}
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Restore
+      - name: Restore all (solution / projects)
         run: |
-          cd services/auth-service-dotnet
+          dotnet --info
           dotnet restore
 
-      - name: Build
+      - name: Build all projects
         run: |
-          cd services/auth-service-dotnet
           dotnet build --configuration Release --no-restore
 
-      - name: Run unit tests
+      - name: Run unit tests and generate TRX results
+        shell: bash
         run: |
-          cd services/auth-service-dotnet
-          dotnet test --configuration Release --no-build --verbosity normal
+          set -euo pipefail
 
-  publish-artifact:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: '9.0.x'
-      - name: Publish artifact (build output)
+          # carpeta donde guardaremos resultados
+          mkdir -p test-results
+
+          # Buscar proyectos de test (case-insensitive)
+          mapfile -t test_projects < <(find . -type f \( -iname "*tests*.csproj" -o -iname "*unittests*.csproj" \) -print)
+
+          if [ ${#test_projects[@]} -eq 0 ]; then
+            echo "No se encontraron proyectos de test."
+            exit 0
+          fi
+
+          for proj in "${test_projects[@]}"; do
+            echo "-------------------------------------------------"
+            echo "Ejecutando tests en: $proj"
+
+            # generar un nombre legible para el archivo (sin path ni extension)
+            proj_name=$(basename "$proj" | sed 's/\.csproj$//i')
+            timestamp=$(date +%s)
+            trx_file="test-results/${proj_name}-${timestamp}.trx"
+
+            # Ejecutar dotnet test y generar TRX
+            # --logger "trx;LogFileName=..." crea el archivo TRX en el working directory por defecto,
+            # por eso redirigimos con --results-directory para garantizar la ubicación
+            dotnet test "$proj" \
+              --configuration Release \
+              --no-build \
+              --logger "trx;LogFileName=${proj_name}-${timestamp}.trx" \
+              --results-directory "test-results"
+
+            echo "Resultados guardados en: ${trx_file}"
+            echo "-------------------------------------------------"
+          done
+
+      - name: List test-results folder
         run: |
-          cd services/auth-service-dotnet
-          dotnet publish -c Release -o publish
-      - name: Upload artifact to GitHub Actions
+          echo "Contenido de test-results:"
+          ls -la test-results || true
+
+      - name: Upload test results artifact
         uses: actions/upload-artifact@v4
         with:
-          name: auth-service-publish
-          path: services/auth-service-dotnet/publish
+          name: test-results-${{ github.run_id }}
+          path: test-results/**
