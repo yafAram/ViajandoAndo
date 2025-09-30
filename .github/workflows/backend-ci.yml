@@ -1,4 +1,4 @@
-name: Backend CI (build & test - .NET 9)
+name: Backend CI (build, test & test-results - .NET 9)
 
 on:
   push:
@@ -28,25 +28,26 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Restore all (solution / projects)
+      - name: Restore all projects
         run: |
+          echo "dotnet --info"
           dotnet --info
           dotnet restore
 
-      - name: Build all projects
+      - name: Build solution / projects
         run: |
           dotnet build --configuration Release --no-restore
 
-      - name: Run unit tests and generate TRX results
+      - name: Run unit tests and produce TRX results
         shell: bash
         run: |
           set -euo pipefail
-
-          # carpeta donde guardaremos resultados
           mkdir -p test-results
 
-          # Buscar proyectos de test (case-insensitive)
-          mapfile -t test_projects < <(find . -type f \( -iname "*tests*.csproj" -o -iname "*unittests*.csproj" \) -print)
+          # Buscamos proyectos de test en dos sitios comunes:
+          #  - ./tests/** (proyectos de tests centrales)
+          #  - ./services/**/tests/** (tests dentro de cada servicio)
+          mapfile -t test_projects < <(find ./tests ./services -type f \( -iname "*tests*.csproj" -o -iname "*unittests*.csproj" \) -print 2>/dev/null || true)
 
           if [ ${#test_projects[@]} -eq 0 ]; then
             echo "No se encontraron proyectos de test."
@@ -56,22 +57,15 @@ jobs:
           for proj in "${test_projects[@]}"; do
             echo "-------------------------------------------------"
             echo "Ejecutando tests en: $proj"
-
-            # generar un nombre legible para el archivo (sin path ni extension)
             proj_name=$(basename "$proj" | sed 's/\.csproj$//i')
             timestamp=$(date +%s)
-            trx_file="test-results/${proj_name}-${timestamp}.trx"
-
-            # Ejecutar dotnet test y generar TRX
-            # --logger "trx;LogFileName=..." crea el archivo TRX en el working directory por defecto,
-            # por eso redirigimos con --results-directory para garantizar la ubicación
+            # Ejecutar y generar TRX en la carpeta test-results
             dotnet test "$proj" \
               --configuration Release \
               --no-build \
               --logger "trx;LogFileName=${proj_name}-${timestamp}.trx" \
               --results-directory "test-results"
-
-            echo "Resultados guardados en: ${trx_file}"
+            echo "Resultados guardados en test-results/${proj_name}-${timestamp}.trx"
             echo "-------------------------------------------------"
           done
 
@@ -85,3 +79,6 @@ jobs:
         with:
           name: test-results-${{ github.run_id }}
           path: test-results/**
+
+      # (Opcional) - si en el futuro quieres publicar artefactos (dotnet publish),
+      # agrega un job separado con condiciones y secrets para deploy.
