@@ -1,21 +1,44 @@
-# Android/IntelliJ
-.gradle/
-local.properties
-/.idea/
-/build/
-/app/build/
-
-# Node
-node_modules/
-.env
-
-# .NET
+# Visual Studio / .NET
 bin/
 obj/
-publish/
+.vs/
 *.user
-*.vs
+*.suo
+*.userosscache
+*.sln.docstates
+*.dbmdl
+TestResults/
+*.pdb
 
-# General
+# EF / Migrations (si deseas ignorar builds)
+**/Migrations/**/bin/
+**/Migrations/**/obj/
+
+# Secret files
+appsettings.*.json
+secrets.json
+*.pfx
+*.jks
+*.keystore
+
+# Node / Vue
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+
+# Android / Gradle
+/.gradle/
+/.gradle/
+/local.properties
+**/build/
+**/captures/
+**/*.keystore
+**/*.jks
+
+# JetBrains Rider
+.idea/
+
+# Mac / Windows OS files
 .DS_Store
-*.log
+Thumbs.db

@@ -1,45 +1,126 @@
-name: Backend CI & Deploy
+name: Backend CI (build, test & test-results - .NET 9)
+
 on:
   push:
-    branches: [ develop, main ]
+    branches: [ main, develop, 'feature/**' ]
   pull_request:
-    branches: [ develop, main ]
+    branches: [ main, develop ]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show repo tree (debug)
+        run: |
+          echo "PWD: $(pwd)"
+          echo "List root:"
+          ls -la || true
+          echo "List services:"
+          ls -la services || true
+          echo "List tests:"
+          ls -la tests || true
+
+      - name: Setup .NET 9
         uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: '8.0.x'
-      - name: Restore and Build
-        run: |
-          cd services/auth-service-dotnet
-          dotnet restore
-          dotnet build --configuration Release
-      - name: Run tests
-        run: |
-          cd services/auth-service-dotnet
-          dotnet test --no-build --verbosity normal
+          dotnet-version: '9.0.x'
 
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    # Sólo ejecuto deploy si estamos en develop|main y los secrets existen:
-    if: ${{ (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && secrets.ZOOMIE_SFTP_HOST && secrets.ZOOMIE_SFTP_USER && secrets.ZOOMIE_SFTP_PASS }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Publish artifact
-        run: |
-          cd services/auth-service-dotnet
-          dotnet publish -c Release -o publish
-      - name: Deploy to Zoomie (SFTP example)
-        uses: SamKirkland/FTP-Deploy-Action@4.4.0
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
         with:
-          server: ${{ secrets.ZOOMIE_SFTP_HOST }}
-          username: ${{ secrets.ZOOMIE_SFTP_USER }}
-          password: ${{ secrets.ZOOMIE_SFTP_PASS }}
-          local-dir: services/auth-service-dotnet/publish
-          server-dir: /var/www/miapp
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'global.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Find and restore solution(s) or projects
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Buscar archivos .sln
+          mapfile -t sln_files < <(find . -type f -iname "*.sln" -print 2>/dev/null || true)
+
+          if [ ${#sln_files[@]} -gt 0 ]; then
+            echo "Found solution(s):"
+            for s in "${sln_files[@]}"; do
+              echo " - $s"
+              dotnet restore "$s"
+            done
+          else
+            # No hay .sln: restaurar todos los csproj
+            echo "No .sln files found. Restoring all csproj projects found..."
+            mapfile -t proj_files < <(find . -type f -iname "*.csproj" -print 2>/dev/null || true)
+            for p in "${proj_files[@]}"; do
+              echo " - restoring $p"
+              dotnet restore "$p"
+            done
+          fi
+
+      - name: Build solution(s) or projects
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Si hay soluciones, los construimos; si no, construimos csproj individuales
+          mapfile -t sln_files < <(find . -type f -iname "*.sln" -print 2>/dev/null || true)
+
+          if [ ${#sln_files[@]} -gt 0 ]; then
+            for s in "${sln_files[@]}"; do
+              echo "Building solution: $s"
+              dotnet build "$s" --configuration Release --no-restore
+            done
+          else
+            echo "No solution found. Building all csproj files..."
+            mapfile -t proj_files < <(find . -type f -iname "*.csproj" -print 2>/dev/null || true)
+            for p in "${proj_files[@]}"; do
+              echo "Building project: $p"
+              dotnet build "$p" --configuration Release --no-restore
+            done
+          fi
+
+      - name: Run unit tests and produce TRX results
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+
+          # Buscar proyectos de test en ./tests y en ./services (tests alojados junto a servicios)
+          mapfile -t test_projects < <(find ./tests ./services -type f \( -iname "*tests*.csproj" -o -iname "*unittests*.csproj" -o -iname "*test*.csproj" \) -print 2>/dev/null || true)
+
+          if [ ${#test_projects[@]} -eq 0 ]; then
+            echo "No test projects found. Exiting tests step."
+            exit 0
+          fi
+
+          for proj in "${test_projects[@]}"; do
+            echo "-------------------------------------------------"
+            echo "Running tests in: $proj"
+            proj_name=$(basename "$proj" | sed 's/\.csproj$//i')
+            timestamp=$(date +%s)
+            dotnet test "$proj" \
+              --configuration Release \
+              --no-build \
+              --logger "trx;LogFileName=${proj_name}-${timestamp}.trx" \
+              --results-directory "test-results"
+            echo "Saved TRX: test-results/${proj_name}-${timestamp}.trx"
+            echo "-------------------------------------------------"
+          done
+
+      - name: List test-results folder
+        run: |
+          echo "Contenido de test-results:"
+          ls -la test-results || true
+
+      - name: Upload test results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_id }}
+          path: test-results/**
+
+      # Nota: Si quieres publicar artefactos .NET (dotnet publish), lo hacemos en un job separado con condiciones y secrets.
