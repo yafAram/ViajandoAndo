@@ -15,6 +15,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Show repo tree (debug)
+        run: |
+          echo "PWD: $(pwd)"
+          echo "List root:"
+          ls -la || true
+          echo "List services:"
+          ls -la services || true
+          echo "List tests:"
+          ls -la tests || true
+
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v3
         with:
@@ -28,15 +38,51 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Restore all projects
+      - name: Find and restore solution(s) or projects
+        shell: bash
         run: |
-          echo "dotnet --info"
-          dotnet --info
-          dotnet restore
+          set -euo pipefail
 
-      - name: Build solution / projects
+          # Buscar archivos .sln
+          mapfile -t sln_files < <(find . -type f -iname "*.sln" -print 2>/dev/null || true)
+
+          if [ ${#sln_files[@]} -gt 0 ]; then
+            echo "Found solution(s):"
+            for s in "${sln_files[@]}"; do
+              echo " - $s"
+              dotnet restore "$s"
+            done
+          else
+            # No hay .sln: restaurar todos los csproj
+            echo "No .sln files found. Restoring all csproj projects found..."
+            mapfile -t proj_files < <(find . -type f -iname "*.csproj" -print 2>/dev/null || true)
+            for p in "${proj_files[@]}"; do
+              echo " - restoring $p"
+              dotnet restore "$p"
+            done
+          fi
+
+      - name: Build solution(s) or projects
+        shell: bash
         run: |
-          dotnet build --configuration Release --no-restore
+          set -euo pipefail
+
+          # Si hay soluciones, los construimos; si no, construimos csproj individuales
+          mapfile -t sln_files < <(find . -type f -iname "*.sln" -print 2>/dev/null || true)
+
+          if [ ${#sln_files[@]} -gt 0 ]; then
+            for s in "${sln_files[@]}"; do
+              echo "Building solution: $s"
+              dotnet build "$s" --configuration Release --no-restore
+            done
+          else
+            echo "No solution found. Building all csproj files..."
+            mapfile -t proj_files < <(find . -type f -iname "*.csproj" -print 2>/dev/null || true)
+            for p in "${proj_files[@]}"; do
+              echo "Building project: $p"
+              dotnet build "$p" --configuration Release --no-restore
+            done
+          fi
 
       - name: Run unit tests and produce TRX results
         shell: bash
@@ -44,28 +90,25 @@ jobs:
           set -euo pipefail
           mkdir -p test-results
 
-          # Buscamos proyectos de test en dos sitios comunes:
-          #  - ./tests/** (proyectos de tests centrales)
-          #  - ./services/**/tests/** (tests dentro de cada servicio)
-          mapfile -t test_projects < <(find ./tests ./services -type f \( -iname "*tests*.csproj" -o -iname "*unittests*.csproj" \) -print 2>/dev/null || true)
+          # Buscar proyectos de test en ./tests y en ./services (tests alojados junto a servicios)
+          mapfile -t test_projects < <(find ./tests ./services -type f \( -iname "*tests*.csproj" -o -iname "*unittests*.csproj" -o -iname "*test*.csproj" \) -print 2>/dev/null || true)
 
           if [ ${#test_projects[@]} -eq 0 ]; then
-            echo "No se encontraron proyectos de test."
+            echo "No test projects found. Exiting tests step."
             exit 0
           fi
 
           for proj in "${test_projects[@]}"; do
             echo "-------------------------------------------------"
-            echo "Ejecutando tests en: $proj"
+            echo "Running tests in: $proj"
             proj_name=$(basename "$proj" | sed 's/\.csproj$//i')
             timestamp=$(date +%s)
-            # Ejecutar y generar TRX en la carpeta test-results
             dotnet test "$proj" \
               --configuration Release \
               --no-build \
               --logger "trx;LogFileName=${proj_name}-${timestamp}.trx" \
               --results-directory "test-results"
-            echo "Resultados guardados en test-results/${proj_name}-${timestamp}.trx"
+            echo "Saved TRX: test-results/${proj_name}-${timestamp}.trx"
             echo "-------------------------------------------------"
           done
 
@@ -80,5 +123,4 @@ jobs:
           name: test-results-${{ github.run_id }}
           path: test-results/**
 
-      # (Opcional) - si en el futuro quieres publicar artefactos (dotnet publish),
-      # agrega un job separado con condiciones y secrets para deploy.
+      # Nota: Si quieres publicar artefactos .NET (dotnet publish), lo hacemos en un job separado con condiciones y secrets.
