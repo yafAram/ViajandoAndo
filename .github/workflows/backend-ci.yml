@@ -1,4 +1,4 @@
-name: Backend CI & Deploy
+name: Backend CI (Build & Test)
 on:
   push:
     branches: [ develop, main ]
@@ -9,37 +9,53 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
         uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: '8.0.x'
-      - name: Restore and Build
+          dotnet-version: '9.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/global.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
         run: |
           cd services/auth-service-dotnet
           dotnet restore
-          dotnet build --configuration Release
-      - name: Run tests
+
+      - name: Build
         run: |
           cd services/auth-service-dotnet
-          dotnet test --no-build --verbosity normal
+          dotnet build --configuration Release --no-restore
 
-  deploy:
+      - name: Run unit tests
+        run: |
+          cd services/auth-service-dotnet
+          dotnet test --configuration Release --no-build --verbosity normal
+
+  publish-artifact:
     needs: build-and-test
     runs-on: ubuntu-latest
-    # Sólo ejecuto deploy si estamos en develop|main y los secrets existen:
-    if: ${{ (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && secrets.ZOOMIE_SFTP_HOST && secrets.ZOOMIE_SFTP_USER && secrets.ZOOMIE_SFTP_PASS }}
+    if: ${{ always() }}
     steps:
       - uses: actions/checkout@v4
-      - name: Publish artifact
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '9.0.x'
+      - name: Publish artifact (build output)
         run: |
           cd services/auth-service-dotnet
           dotnet publish -c Release -o publish
-      - name: Deploy to Zoomie (SFTP example)
-        uses: SamKirkland/FTP-Deploy-Action@4.4.0
+      - name: Upload artifact to GitHub Actions
+        uses: actions/upload-artifact@v4
         with:
-          server: ${{ secrets.ZOOMIE_SFTP_HOST }}
-          username: ${{ secrets.ZOOMIE_SFTP_USER }}
-          password: ${{ secrets.ZOOMIE_SFTP_PASS }}
-          local-dir: services/auth-service-dotnet/publish
-          server-dir: /var/www/miapp
+          name: auth-service-publish
+          path: services/auth-service-dotnet/publish
