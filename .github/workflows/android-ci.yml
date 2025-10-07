@@ -1,15 +1,31 @@
 name: Android CI
+
 on:
   push:
-    branches: [ develop, main ]
+    branches: [ develop, main, 'release/**' ]
+    paths:
+      - 'mobile-android/**'
+      - 'mobile-android/**/**'
+      - '**/*.gradle*'
+      - 'gradle/**'
   pull_request:
-    branches: [ develop, main ]
+    branches: [ develop, main, 'release/**' ]
+    paths:
+      - 'mobile-android/**'
+      - '**/*.gradle*'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Skip if no Android project
+        run: |
+          if [ ! -d "mobile-android" ]; then
+            echo "No Android project detected in mobile-android/ -> skipping job."
+            exit 0
+          fi
 
       - name: Setup JDK
         uses: actions/setup-java@v4
