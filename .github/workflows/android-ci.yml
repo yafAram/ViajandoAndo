@@ -19,13 +19,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Skip if no Android project
+      - name: Detect Android project directory
+        id: detect
         run: |
-          if [ ! -d "mobile-android" ]; then
-            echo "No Android project detected in mobile-android/ -> skipping job."
-            exit 0
+          # Prefer explicit subfolder if it exists
+          if [ -d "mobile-android/AndandoAndo_App" ]; then
+            echo "project_dir=mobile-android/AndandoAndo_App" >> $GITHUB_ENV
+          elif [ -d "mobile-android" ] && (ls mobile-android | grep -q "app\|build.gradle\|settings.gradle" 2>/dev/null); then
+            echo "project_dir=mobile-android" >> $GITHUB_ENV
+          else
+            echo "project_dir=" >> $GITHUB_ENV
           fi
+          echo "Detected project dir: $project_dir"
+      - name: Abort if no Android project found
+        if: ${{ env.project_dir == '' }}
+        run: |
+          echo "No Android project found under mobile-android. Skipping job."
+          exit 0
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -39,14 +52,16 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-cache
 
       - name: Build Debug APK
         run: |
-          cd mobile-android
+          cd ${{ env.project_dir }}
+          chmod +x ./gradlew || true
           ./gradlew assembleDebug
 
       - name: Run unit tests
         run: |
-          cd mobile-android
+          cd ${{ env.project_dir }}
+          chmod +x ./gradlew || true
           ./gradlew testDebugUnitTest
