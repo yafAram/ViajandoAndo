@@ -543,7 +543,6 @@ Junior Backend Developer
 
 * GitHub: [github.com/yafAram](https://github.com/yafAram)
 * Email: [yaftearam34@gmail.com](mailto:yaftearam34@gmail.com)
-* LinkedIn: agregar enlace
 
 ---
 
