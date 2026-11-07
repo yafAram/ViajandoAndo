@@ -42,3 +42,11 @@ yarn-error.log
 # Mac / Windows OS files
 .DS_Store
 Thumbs.db
+
+# Perfiles de publicación (contienen host y usuario de despliegue)
+*.pubxml
+*.pubxml.user
+
+# Variables de entorno locales
+.env
+.env.*
